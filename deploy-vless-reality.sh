@@ -37,17 +37,53 @@ apt-get install -y curl wget unzip openssl jq
 # 获取公网 IPv6 地址
 echo "[2/7] 获取公网 IPv6 地址..."
 
-# 方法1: 从 ifconfig.365919.xyz 获取
-PUBLIC_IP=$(curl -s -6 https://ifconfig.365919.xyz 2>/dev/null || echo "")
+# 方法1: 从 ifconfig.365919.xyz 获取 (返回 JSON,需智能解析)
+RAW_JSON=$(curl -s -6 --max-time 5 https://ifconfig.365919.xyz 2>/dev/null || echo "")
+if [ -n "$RAW_JSON" ]; then
+    # 尝试多种可能的字段名提取 IPv6
+    # 优先级: ipv6 > ip6 > IPv6 > IP6 > addr_ipv6
+    PUBLIC_IP=$(echo "$RAW_JSON" | jq -r '
+        if .ipv6 and (.ipv6 | test("^[0-9a-fA-F:]+$")) then .ipv6
+        elif .ip6 and (.ip6 | test("^[0-9a-fA-F:]+$")) then .ip6
+        elif .IPv6 and (.IPv6 | test("^[0-9a-fA-F:]+$")) then .IPv6
+        elif .IP6 and (.IP6 | test("^[0-9a-fA-F:]+$")) then .IP6
+        elif .addr_ipv6 and (.addr_ipv6 | test("^[0-9a-fA-F:]+$")) then .addr_ipv6
+        else empty
+        end
+    ' 2>/dev/null || echo "")
 
-# 方法2: 备用 IPv6 API
-if [ -z "$PUBLIC_IP" ]; then
-    PUBLIC_IP=$(curl -s -6 https://api64.ipify.org 2>/dev/null || echo "")
+    # 如果还是没有,尝试从所有字符串值中找 IPv6 地址
+    if [ -z "$PUBLIC_IP" ]; then
+        PUBLIC_IP=$(echo "$RAW_JSON" | jq -r '
+            [.. | strings] | map(select(test("^[0-9a-fA-F]*:[0-9a-fA-F:]*$"))) |
+            map(select(length > 3)) | first // empty
+        ' 2>/dev/null || echo "")
+    fi
 fi
 
-# 方法3: 从本地网络接口获取
+# 方法2: 备用 IPv6 API (api64.ipify.org - 纯文本)
 if [ -z "$PUBLIC_IP" ]; then
-    PUBLIC_IP=$(ip -6 addr show scope global | grep inet6 | awk '{print $2}' | cut -d'/' -f1 | head -n1)
+    echo "尝试备用 API: api64.ipify.org..."
+    PUBLIC_IP=$(curl -s -6 --max-time 5 https://api64.ipify.org 2>/dev/null || echo "")
+fi
+
+# 方法3: 另一个备用 API (ident.me - 纯文本)
+if [ -z "$PUBLIC_IP" ]; then
+    echo "尝试备用 API: ident.me..."
+    PUBLIC_IP=$(curl -s -6 --max-time 5 https://v6.ident.me 2>/dev/null || echo "")
+fi
+
+# 方法4: 再一个备用 API (icanhazip - 纯文本)
+if [ -z "$PUBLIC_IP" ]; then
+    echo "尝试备用 API: icanhazip..."
+    PUBLIC_IP=$(curl -s -6 --max-time 5 https://ipv6.icanhazip.com 2>/dev/null || echo "")
+fi
+
+# 方法5: 从本地网络接口获取全局 IPv6 地址
+if [ -z "$PUBLIC_IP" ]; then
+    echo "尝试从本地网络接口获取..."
+    # 获取第一个全局单播 IPv6 地址 (排除临时地址和链路本地地址)
+    PUBLIC_IP=$(ip -6 addr show scope global | grep -v "temporary" | grep "inet6" | awk '{print $2}' | cut -d'/' -f1 | head -n1)
 fi
 
 if [ -z "$PUBLIC_IP" ]; then
