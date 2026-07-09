@@ -246,10 +246,10 @@ cat > /usr/local/etc/xray/config.json << EOF
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "dest": "www.microsoft.com:443",
+          "dest": "www.cloudflare.com:443",
           "xver": 0,
           "serverNames": [
-            "www.microsoft.com"
+            "www.cloudflare.com"
           ],
           "privateKey": "${PRIVATE_KEY}",
           "shortIds": [
