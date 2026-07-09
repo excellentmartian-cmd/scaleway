@@ -120,8 +120,10 @@ KEY_PAIR=$(openssl rand -hex 32)
 PRIVATE_KEY=$KEY_PAIR
 
 # 使用 xray 生成公钥（如果已安装）或手动计算
+# 此时 xray 通常还未安装(安装步骤在后面第 [6/7] 步),所以大概率会走 else 分支，
+# 真正生成公钥是在第 [6/7] 步安装完 xray 之后完成的，这里只是提前尝试一次。
 if command -v xray &> /dev/null; then
-    PUBLIC_KEY=$(xray x25519 -i "$PRIVATE_KEY" | grep "Public key:" | awk '{print $3}')
+    PUBLIC_KEY=$(xray x25519 -i "$PRIVATE_KEY" | grep -iE "public|password" | head -n1 | awk -F': ' '{print $NF}' | tr -d '[:space:]')
 else
     # 如果没有 xray，使用预生成的方式
     echo "注意: 未检测到 xray，将使用备用方法生成公钥"
@@ -145,8 +147,8 @@ echo "[6/7] 下载并安装 Xray..."
 XRAY_VERSION=$(curl -s --max-time 10 https://api.github.com/repos/XTLS/Xray-core/releases/latest 2>/dev/null | grep '"tag_name"' | cut -d'"' -f4 || echo "")
 
 if [ -z "$XRAY_VERSION" ]; then
-    echo "警告: 无法从 GitHub API 获取最新版本,使用备用版本 v1.8.24"
-    XRAY_VERSION="v1.8.24"
+    echo "警告: 无法从 GitHub API 获取最新版本,使用备用版本 v26.3.27"
+    XRAY_VERSION="v26.3.27"
 fi
 
 ARCH=$(uname -m)
@@ -187,8 +189,21 @@ rm -rf /tmp/xray-temp /tmp/xray.zip
 echo "Xray 安装成功"
 
 # 重新生成公钥
+# 注意: xray x25519 命令的输出格式在不同版本间发生过变化
+#   旧版本: "Public key: xxxxx"
+#   新版本(v25.x+): "Password (PublicKey): xxxxx" 或 "Password: xxxxx"
+# 因此不能死等某个固定字符串,改为兼容匹配 public/password 字段
 if [ -z "$PUBLIC_KEY" ]; then
-    PUBLIC_KEY=$(xray x25519 -i "$PRIVATE_KEY" | grep "Public key:" | awk '{print $3}')
+    KEY_OUTPUT=$(xray x25519 -i "$PRIVATE_KEY")
+    PUBLIC_KEY=$(echo "$KEY_OUTPUT" | grep -iE "public|password" | head -n1 | awk -F': ' '{print $NF}' | tr -d '[:space:]')
+
+    if [ -z "$PUBLIC_KEY" ]; then
+        echo "错误: 无法从 xray x25519 输出中解析公钥"
+        echo "原始输出如下,请检查是否为新的格式变化:"
+        echo "$KEY_OUTPUT"
+        exit 1
+    fi
+
     echo "公钥已生成: $PUBLIC_KEY"
 fi
 
@@ -299,6 +314,13 @@ echo ""
 echo "========================================="
 echo "  生成 VLESS 连接链接"
 echo "========================================="
+
+# 最终校验: 公钥不能为空,否则生成的链接客户端无法连接
+if [ -z "$PUBLIC_KEY" ]; then
+    echo "错误: 公钥为空,无法生成有效的 vless:// 链接"
+    echo "请手动执行: xray x25519 -i \"$PRIVATE_KEY\" 查看输出并检查解析逻辑"
+    exit 1
+fi
 
 # 生成 vless:// 链接 (IPv6 地址需要用方括号包裹)
 VLESS_LINK="vless://${UUID}@[${PUBLIC_IP}]:443?encryption=none&security=reality&sni=www.microsoft.com&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORTID}&type=tcp&flow=xtls-rprx-vision#VLESS-Reality-IPv6"
