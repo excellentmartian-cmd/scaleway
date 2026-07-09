@@ -116,8 +116,10 @@ echo ""
 
 # 生成 X25519 密钥对
 echo "[4/7] 生成 X25519 密钥对..."
-KEY_PAIR=$(openssl rand -hex 32)
-PRIVATE_KEY=$KEY_PAIR
+# 注意: xray x25519 -i 要求输入是 base64url(无填充) 编码的 32 字节随机数，
+# 不能用 openssl rand -hex 32 (那是 hex 编码，长度/格式对不上，新版 xray 会报
+# "Invalid length of X25519 private key." 并直接退出)
+PRIVATE_KEY=$(openssl rand 32 | base64 | tr '+/' '-_' | tr -d '=')
 
 # 使用 xray 生成公钥（如果已安装）或手动计算
 # 此时 xray 通常还未安装(安装步骤在后面第 [6/7] 步),所以大概率会走 else 分支，
